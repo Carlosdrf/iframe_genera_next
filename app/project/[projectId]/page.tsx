@@ -1,4 +1,5 @@
 import React from "react";
+import AmplifyTest from "../../components/AmplifyTest";
 
 const baseUrl =
   "https://lookerstudio.google.com/embed/reporting/d9700366-d5d8-4a8c-8b4a-9bc62a3b2a9b/page/uU4kF";
@@ -21,6 +22,7 @@ export default async function Project({ params }) {
     <>
       <section className="min-h-screen container flex flex-col mx-auto">
         <h1 className="text-white py-4 text-2xl">Genera metrics demo</h1>
+        <AmplifyTest />
         {loadFrame && (
           <iframe
             className="h-full flex-1"
