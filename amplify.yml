@@ -1,0 +1,99 @@
+version: 1
+backend:
+  phases:
+    preBuild:
+      commands:
+        - echo "GENERA_APPLICATION_API_KEY - $GENERA_APPLICATION_API_KEY"
+        - echo "TENANT_ID - $TENANT_ID"
+        - echo "CLIENT_ID - $CLIENT_ID"
+        - echo "BRAND_ID - $BRAND_ID"
+        - echo "STORE_BUCKET - $STORE_BUCKET"
+        - echo "REGION - $REGION"
+        - echo "API EXECUTION - $GENERA_API_DOMAIN/api/dev/v1/clients/$CLIENT_ID/brands/$BRAND_ID/applications/$AWS_APP_ID/application-models/generateAmplifyApp"
+
+        # === Trigger CodeBuild Process ===
+        - |
+          echo "Triggering CodeBuild..."
+          BUILD_RESPONSE=$(curl -s "$GENERA_API_DOMAIN/api/dev/v1/clients/$CLIENT_ID/brands/$BRAND_ID/applications/$AWS_APP_ID/application-models/generateAmplifyApp"                     -H "x-api-key: $GENERA_APPLICATION_API_KEY"                     -H "accept: application/json")
+
+          echo "Raw build response: $BUILD_RESPONSE"
+          BUILD_ID=$(node -pe 'JSON.parse(process.argv[1]).data[0].name' "$BUILD_RESPONSE")
+
+          if [ -z "$BUILD_ID" ] || [ "$BUILD_ID" == "null" ]; then
+            echo "Error - BUILD_ID not found in response"
+          else 
+            echo "Build ID - $BUILD_ID"
+            
+            # === Poll for Build Completion ===
+            echo "Polling build status..."
+            ATTEMPTS=0
+            MAX_ATTEMPTS=30  # 30 x 30s = 15 min timeout
+
+            while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
+              STATUS_RESPONSE=$(curl -s "$GENERA_API_DOMAIN/api/dev/v1/clients/$CLIENT_ID/brands/$BRAND_ID/applications/$AWS_APP_ID/application-models/checkCodeBuildStatus/$BUILD_ID"                         -H "x-api-key: $GENERA_APPLICATION_API_KEY")
+
+              STATUS=$(node -pe 'process.argv[1]' "$STATUS_RESPONSE")
+              echo "Build Status response: $STATUS"
+
+              if [ "$STATUS" == "IN_PROGRESS" ]; then
+                echo "Waiting 30s to check for new status..."
+                sleep 30
+                ATTEMPTS=$((ATTEMPTS + 1))
+              elif [ "$STATUS" == "SUCCEEDED" ]; then
+                echo "Build succeeded."
+                break
+              elif [ "$STATUS" == "FAILED" ]; then
+                echo "Build failed."
+                exit 1
+              else
+                echo "Unexpected build status: $STATUS"
+                exit 1
+              fi
+            done
+
+            if [ $ATTEMPTS -eq $MAX_ATTEMPTS ]; then
+              echo "Timeout - Build did not complete in time."
+              exit 1
+            fi
+
+            # === Download and Unzip Generated Files ===
+            echo Downloading generated files https://$STORE_BUCKET.s3.$REGION.amazonaws.com/application-zips/$AWS_APP_ID.zip
+
+            PRESIGNED_RESPONSE=$(curl -s "$GENERA_API_DOMAIN/api/dev/v1/clients/$CLIENT_ID/brands/$BRAND_ID/applications/$AWS_APP_ID/application-models/generatePresignedPostCodeBuild"                       -H 'Content-Type: application/json'                       -H 'accept: application/json'                       -H "x-api-key: $GENERA_APPLICATION_API_KEY"                       --data-raw '{"fileName":"application-zips/'"$AWS_APP_ID"'.zip","isFetchProcess":true}')
+
+            echo "PRESIGNED RESPONSE: $PRESIGNED_RESPONSE"
+            PRESIGNED_URL=$(node -pe 'JSON.parse(process.argv[1]).url' "$PRESIGNED_RESPONSE")
+            echo "PRESIGNED URL: $PRESIGNED_URL"
+
+            curl -s -o generated.zip $PRESIGNED_URL
+            unzip -o generated.zip -d ./
+            echo "Files extracted to ./ (Root)"
+            ls -alh ./
+          fi
+
+    build:
+      commands:
+        - npm ci --cache .npm --prefer-offline
+        - npx ampx pipeline-deploy --branch $AWS_BRANCH --app-id $AWS_APP_ID
+        - npx ampx generate outputs --branch $AWS_BRANCH --app-id $AWS_APP_ID
+
+    postBuild:
+      commands:
+        - |
+          echo "Update environment variables..."
+          BUILD_RESPONSE=$(curl -s "$GENERA_API_DOMAIN/api/dev/v1/clients/$CLIENT_ID/brands/$BRAND_ID/applications/$AWS_APP_ID/updateAmplifyEnvironment"                     -H "x-api-key: $GENERA_APPLICATION_API_KEY"                     -H "accept: application/json")
+
+frontend:
+  phases:
+    build:
+      commands:
+        - npm run build
+  artifacts:
+    baseDirectory: .next
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - .next/cache/**/*
+      - .npm/**/*
+      - node_modules/**/*
