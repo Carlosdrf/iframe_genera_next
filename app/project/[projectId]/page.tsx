@@ -22,7 +22,6 @@ export default async function Project({ params }) {
     <>
       <section className="min-h-screen container flex flex-col mx-auto">
         <h1 className="text-white py-4 text-2xl">Genera metrics demo</h1>
-        <AmplifyTest />
         {loadFrame && (
           <iframe
             className="h-full flex-1"
@@ -31,7 +30,7 @@ export default async function Project({ params }) {
             src={url}
             style={{ border: 0 }}
             allowFullScreen
-            sandbox="allow-storage-access-by-user-activation allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+            sandbox="allow-storage-access-by-user-activation allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-downloads"
           ></iframe>
         )}
       </section>
